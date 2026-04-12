@@ -32,6 +32,7 @@
 |----|---------------|----------------------------------------------|-------------|---------|-----------------------------------|------|
 | 01 | S3 + EC2      | docker save → S3 → EC2 で load → ECR push    | EC2 常駐    | 高 (手動) | Docker daemon 必要、手順が多い      | 成功 |
 | 02 | S3 + CodeBuild | Dockerfile+context を S3 → CodeBuild で build & push | 実行時のみ | 低 (自動) | CodeBuild の VPC モード + Endpoints 必要 | 成功 |
+| 03 | S3 + Lambda (自動) | S3 put → EventBridge → Lambda (crane) → ECR push | 実行時のみ | 最低 (全自動) | ビルド不可 (tar push のみ)、Lambda サイズ制限 | 成功 |
 
 詳細は各 approach の `runbook.md` を参照。
 
@@ -40,8 +41,10 @@
 - どちらのアプローチも S3 を中継点として ECR push が可能
 - **既存イメージをそのまま持ち込むだけなら 01 (S3 + EC2)** が最もシンプル
 - **Dockerfile からビルドしたい場合は 02 (S3 + CodeBuild)** が EC2 管理不要で楽。ただしベースイメージは事前に ECR に登録しておく必要がある (結局 01 が先に必要)
-- VPC Endpoint のコストに注意: Interface Endpoint は 1 つあたり ~$0.014/h × AZ 数。01 は 5 つ (ECR 2 + SSM 3)、02 は 3 つ (ECR 2 + Logs 1) + S3 Gateway (無料)
+- **ビルド不要で自動化したいなら 03 (S3 + Lambda)** が最も運用負荷が低い。S3 にアップロードするだけで完了
+- VPC Endpoint のコストに注意: Interface Endpoint は 1 つあたり ~$0.014/h × AZ 数。01 は 5 つ (ECR 2 + SSM 3)、02 は 3 つ (ECR 2 + Logs 1)、03 は 2 つ (ECR 2) + S3 Gateway (無料)
 - CodeBuild の S3 ソースでは `CODEBUILD_RESOLVED_SOURCE_VERSION` が空になるため、タグは自前で指定する必要がある
+- Lambda で crane を使う場合、`DOCKER_CONFIG=/tmp/.docker` の設定と tar.gz の事前展開が必要
 
 ## 関連リンク
 
