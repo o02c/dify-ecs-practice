@@ -1,5 +1,6 @@
 - gitコマンドを極力直接利用せずに、jjコマンドを利用すること
 - セットアップ経緯と設計方針は `HANDOFF.md` を参照すること (存在する場合)
+- このリポジトリ配下で AWS を叩くときは `AWS_PROFILE=terraform` を既定とする
 
 ```bash
 Jujutsu (An experimental VCS)

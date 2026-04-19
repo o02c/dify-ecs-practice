@@ -16,3 +16,10 @@ terraform.rc
 
 # Lambda build artifacts
 **/terraform/build/
+**/terraform/.build/
+
+# macOS
+.DS_Store
+
+# local-only state files
+.claude/scheduled_tasks.lock
