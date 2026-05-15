@@ -83,7 +83,52 @@ jj abandon <change-id>
 jj abandon <root-change>..<top-change>
 ```
 
-### 5. 進行中の別 work を main に rebase
+### 5. abandon 後は明示的に main に乗り直す
+
+abandon すると `@` は abandoned commit の親に移動するが、その親は **fetch 前の古い main commit** のことがある (rebase 前の状態を引きずる)。working copy が新 main の内容を反映しないままになり、新しい sandbox や skill が disk から消えたように見える。
+
+abandon 直後に必ず:
+
+```sh
+jj new main
+```
+
+これで `@` が新 main の直接の子になり、working copy も最新 main の内容に揃う。
+
+### 6. AWS リソースの destroy (sandbox の場合)
+
+このリポジトリの sandbox は検証用なので、merge 後に terraform で立てたリソースを destroy するところまでがセット:
+
+```sh
+cd sandboxes/<YYYYMMDD>-<topic>/<approach>/terraform
+AWS_PROFILE=terraform terraform destroy -auto-approve
+```
+
+複数 approach がある場合は使った全部に対して実行する。
+
+destroy 後の必須チェック:
+
+- **Lambda の CloudWatch Log Group は terraform で明示管理してない限り残る**。Lambda destroy 時に自動削除されないので手動削除する:
+
+  ```sh
+  AWS_PROFILE=terraform aws logs describe-log-groups --region <region> \
+    --log-group-name-prefix '/aws/lambda/<prefix>' \
+    --query 'logGroups[].logGroupName' --output text
+  AWS_PROFILE=terraform aws logs delete-log-group --region <region> \
+    --log-group-name <name>
+  ```
+
+- **Route53 Domains の name_server は destroy された Hosted Zone の NS を指したまま残る**。`aws_route53domains_registered_domain` を destroy しても name_server の中身は AWS 側でリセットされない仕様。次に同じドメインを使うときに新 NS で上書き apply する前提で放置で OK
+- **AWS 棚卸し**で見落としチェック:
+
+  ```sh
+  prefix=<sandbox-name>
+  AWS_PROFILE=terraform aws lambda list-functions --region <region> \
+    --query "Functions[?contains(FunctionName, \`$prefix\`)].FunctionName" --output text
+  # 同様に sns / sqs / s3 / iam / ses / alarm / hosted-zone / sesv2 identities を全件確認
+  ```
+
+### 7. 進行中の別 work を main に rebase
 
 PR の親に依存していた別ブランチがあれば、新しい main の先端に乗せ直す:
 
