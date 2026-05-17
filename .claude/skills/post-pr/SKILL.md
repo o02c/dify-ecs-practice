@@ -40,6 +40,16 @@ start-work skill 参照。
 jj git fetch
 ```
 
+`jj git fetch` は **bookmark の自動消去や、merge 済 change の auto-abandon を勝手にやることがある**。
+GitHub 側で squash merge + ブランチ自動削除されていると、fetch だけで以下が完了することが多い:
+
+- remote bookmark (`feat-<topic>@origin`) の削除追従
+- 同名のローカル bookmark の forget
+- merge された自分のローカル change の abandon
+
+その場合、後続の `jj bookmark forget` / `jj abandon` は `No matching bookmarks` /
+`Revision doesn't exist` のエラーになる。**エラーは無視して次のステップに進んで良い**。
+
 ### 2. main に merge commit が反映されたか確認
 
 ```sh
@@ -53,6 +63,8 @@ PR の squash merge / merge commit が main の先端にあれば取り込み済
 ```sh
 jj bookmark forget feat-<topic>
 ```
+
+(Step 1 の自動消去で既に消えていればエラーになるので無視する)
 
 GitHub 側で `--delete-branch` していれば remote tracking ブランチも `jj git fetch` で消える。
 GitHub の自動ブランチ削除が無効の場合は手動で:
@@ -82,6 +94,9 @@ jj abandon <change-id>
 ```sh
 jj abandon <root-change>..<top-change>
 ```
+
+Step 1 で auto-abandon されていれば `Revision doesn't exist` でエラーになる。これも無視して OK。
+ただし Step 5 (`jj new main`) は **abandon の自動 / 手動に関係なく必ず実行する** (@ が古い main 位置に取り残されやすいため)。
 
 ### 5. abandon 後は明示的に main に乗り直す
 
