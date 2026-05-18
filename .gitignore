@@ -17,6 +17,7 @@ terraform.rc
 # Lambda build artifacts
 **/terraform/build/
 **/terraform/.build/
+**/modules/**/.build/
 
 # macOS
 .DS_Store

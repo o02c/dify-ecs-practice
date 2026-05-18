@@ -32,7 +32,9 @@
 
 | #   | Approach                          | 概要                                                            | 制約                                            | 結果 |
 | --- | --------------------------------- | --------------------------------------------------------------- | ----------------------------------------------- | ---- |
-| 01  | classic-auth-and-allowlist        | DMARC PASS 必須 + sender ドメインの allow list (env var)、IP Filter サンプル付き | DMARC 未設定ドメインからの正当メールも `GRAY` で落ちる | OK: 4 シナリオ (Gmail 正規 / SES 自送信 / Hotmail allow list 外 / 偽装 payload) すべて期待通りの判定 |
+| 01  | classic-auth-and-allowlist        | DMARC PASS 必須 + sender ドメインの allow list (env var)、IP Filter サンプル付き。catchall archive あり | DMARC 未設定ドメインからの正当メールも `GRAY` で落ちる / 全 @domain 宛が課金対象 | OK: 4 シナリオ (Gmail 正規 / SES 自送信 / Hotmail allow list 外 / 偽装 payload) すべて期待通りの判定 |
+| 02  | strict-recipient-allowlist        | 01 の Lambda 判定はそのまま、SES Receipt Rule の `recipients` を **許可アドレス列挙のみ** にして catchall 撤廃。列挙外は SMTP 中 reject で課金回避 | 不正な宛先への送信試行が記録に残らない (CloudWatch メトリクスにも乗らない) | OK: inbox 宛 ACCEPTED + random 宛 SMTP 550、受信は inbox 宛 1 件のみ課金対象 |
+| 03  | classic-with-killswitch           | 02 を module (`modules/ses-inbound`) 経由で再構築 + 受信レート / Lambda 起動レート閾値超過時に自動で active rule set を解除する killswitch Lambda を追加 | アカウント × region singleton なので発火すると同 region の他 SES 受信も止まる / 検知ラグで数分間の被害は発生 / 自動復旧は未実装 (誤発火時の影響大きいため手動推奨) | OK: アラーム手動 ALARM 遷移 → SNS → killswitch Lambda → active rule set 解除を end-to-end 確認、復旧手順も実証 |
 
 詳細は各 approach の `runbook.md` を参照。
 
@@ -105,7 +107,26 @@ SES が自動で SPF / DKIM / DMARC を評価し、結果 (`PASS` / `FAIL` / `GR
 DMARC 未設定の正当ドメイン (古い社内メールサーバー / 個人レンタルサーバー等) からのメールも GRAY で全部 reject される。実運用では「GRAY は WARN ログだけ出して通す」「SPF か DKIM のどちらかだけ PASS なら通す」など緩める判断が必要。本検証は厳しい側に倒した方針。
 
 ### Q11. 棄却されたメールはロストする?
-**しない**。Receipt Rule の archive-all (S3 deliver) が Lambda 検査の前段で実行されるので、すべての受信メールは S3 に生 MIME で保存される。誤判定があれば S3 から messageId で取り出して再処理可能。
+**しない (01 アプローチ)**。Receipt Rule の archive-all (S3 deliver) が Lambda 検査の前段で実行されるので、すべての受信メールは S3 に生 MIME で保存される。誤判定があれば S3 から messageId で取り出して再処理可能。
+
+ただし **02 アプローチ (strict-recipient-allowlist)** では catchall を撤廃したため、許可アドレス以外宛のメールは SES SMTP 中 reject で **そもそも S3 にも残らない**。Q14 のトレードオフ参照。
+
+### Q15. 受信が大量に来たときに自動で止める仕組みは?
+SES 自体に per-customer の inbound rate limit / throttle はない。代替として **CloudWatch アラーム → SNS → Lambda → `ses:SetActiveReceiptRuleSet()` (引数なし) で active rule set を解除** する killswitch パターンを実装する (03 approach)。発火後は全 inbound メールが SMTP 550 で reject される (= 課金されない)。SES Receipt Rule Set がアカウント × region singleton な点を逆手に取った構成。検知ラグは最低 1 分解像 + 評価ウィンドウ + 配信遅延で合計数分、その間の被害は許容する設計。復旧は手動で `aws ses set-active-receipt-rule-set` を呼ぶか `terraform apply -replace=...aws_ses_active_receipt_rule_set...` で再作成。
+
+### Q16. 03 で使った `modules/ses-inbound` module は再利用できる?
+できる。`name` / `domain` / `region` / `allowed_recipients` / `allow_list_domains` / `enable_killswitch` などを変数で渡すだけで同等の構成を別 sandbox / 別環境に展開可能。Lambda ソース (`processor` / `killswitch`) も module 内部 (`lambda/<function_name>/handler.py`) に同梱。本 sandbox 配下に置いてあるので、別 sandbox で再利用したいときは `sandboxes/20260516-ses-inbound-auth-allowlist/modules/ses-inbound/` をその sandbox にコピーして `source = "../../modules/ses-inbound"` で参照する運用 (リポジトリ root 直下の共有 module ディレクトリは作らない方針)。
+
+### Q17. killswitch 発火時の復旧はどうする?
+本検証は **手動復旧 + 通知強化** の方針。`slack_webhook_url` を module 変数で渡しておくと、alerts SNS topic 経由の全アラームが Slack に投稿される (notify Lambda)。メッセージ本文に復旧コマンド (`aws ses set-active-receipt-rule-set --rule-set-name <name>`) が含まれるので、Slack を見た人がコピペで CLI 実行 = 数秒で復旧。自動復旧は誤発火時の影響が大きいので本検証では実装せず。pingpong / cooldown 設計が必要な本格運用なら別途検討。
+
+### Q14. 02 アプローチで課金を回避できる仕組みは?
+SES の Receipt Rule は `recipients` 条件にマッチしない受信メールを **SMTP RCPT TO の段階で reject** (550) する。reject されたメールは:
+- AWS SES の課金対象外 (IP Filter 由来の block と同じ扱い)
+- CloudWatch メトリクス `Received` にもカウントされない
+- Lambda 起動もしない (Lambda 課金もない)
+
+代償として、不正な宛先 (`bbb@`, `random@`, `attacker@` 等) への送信試行が記録されない。攻撃検知や typo 検知 (誤送信元への通知) ができなくなる。「課金最小化」vs「監査ログ充実」のトレードオフ。
 
 ### Q12. Mail Manager (新サービス、2024 GA) は使わないの?
 Mail Manager は Receipt Rule のネイティブ条件で From / Subject / DKIM verdict 等で分岐できてもっとリッチだが、**Ingress Endpoint の固定費用 (per hour)** が sandbox にはオーバーキル。本検証は「classic で同等のことをどこまでできるか」のスコープ。本格運用やヘッダ条件 / Address List (10万件) が必要なら Mail Manager 検討。
