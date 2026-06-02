@@ -1,6 +1,7 @@
 - gitコマンドを極力直接利用せずに、jjコマンドを利用すること
 - セットアップ経緯と設計方針は `HANDOFF.md` を参照すること (存在する場合)
 - このリポジトリ配下で AWS を叩くときは `AWS_PROFILE=terraform` を既定とする
+- terraform の `hashicorp/aws` provider は常に最新を取得すること。`required_providers` の version は最低 `>= 6.0.0` とし、上限 (`< X.0.0`, `~> 6.0` 等) は付けない
 
 ```bash
 Jujutsu (An experimental VCS)
