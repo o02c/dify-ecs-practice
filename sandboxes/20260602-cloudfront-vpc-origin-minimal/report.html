@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>CloudFront VPC Origins 最小構成 検証レポート (2026-06-02)</title>
+<style>
+  :root {
+    --fg: #1f2328;
+    --muted: #57606a;
+    --bg: #ffffff;
+    --bg-alt: #f6f8fa;
+    --border: #d0d7de;
+    --accent: #0969da;
+    --ok: #1a7f37;
+    --ng: #cf222e;
+    --warn: #9a6700;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  html { color: var(--fg); background: var(--bg); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial,
+                 "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    line-height: 1.7;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 32px 24px 80px;
+  }
+  h1 { font-size: 1.8em; border-bottom: 2px solid var(--border); padding-bottom: .3em; }
+  h2 { font-size: 1.35em; border-bottom: 1px solid var(--border); padding-bottom: .2em; margin-top: 2em; }
+  h3 { font-size: 1.1em; margin-top: 1.5em; }
+  .meta { color: var(--muted); font-size: .9em; }
+  code, pre, .mono { font-family: var(--mono); }
+  code { background: var(--bg-alt); padding: 1px 5px; border-radius: 4px; font-size: .9em; }
+  pre {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 16px;
+    overflow-x: auto;
+    font-size: .85em;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0 20px;
+    font-size: .92em;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--bg-alt); font-weight: 600; }
+  .ok { color: var(--ok); font-weight: 600; }
+  .ng { color: var(--ng); font-weight: 600; }
+  .warn { color: var(--warn); font-weight: 600; }
+  .badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: .75em;
+    font-weight: 600;
+  }
+  .badge-required { background: #ffebe9; color: var(--ng); }
+  .badge-default { background: #dafbe1; color: var(--ok); }
+  .badge-optional { background: #fff8c5; color: var(--warn); }
+  ul.compact { margin: 4px 0; padding-left: 24px; }
+  ul.compact li { margin: 2px 0; }
+  blockquote {
+    border-left: 4px solid var(--accent);
+    background: var(--bg-alt);
+    padding: 8px 16px;
+    margin: 12px 0;
+    color: var(--fg);
+  }
+  .partial { color: var(--warn); font-weight: 600; }
+  .toc { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: 12px 24px; }
+  .toc ol { margin: 4px 0; padding-left: 24px; }
+  .figure {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 20px;
+    font-family: var(--mono);
+    font-size: .85em;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .caption { color: var(--muted); font-size: .85em; margin-top: -8px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+
+<h1>CloudFront VPC Origins 最小構成 検証レポート</h1>
+<p class="meta">
+  検証日: 2026-06-02 ・ Region: ap-northeast-1 ・ AWS provider: hashicorp/aws v6.47.0<br/>
+  Sandbox: <code>sandboxes/20260602-cloudfront-vpc-origin-minimal/01-ec2-minimal</code>
+</p>
+
+<blockquote>
+<strong>TL;DR</strong> — VPC Origin 経由で疎通成立する最小は <strong>8 リソース</strong> (VPC + IGW + subnet + SG + SG ingress rule + EC2 + VPC Origin + Distribution)。NAT GW / public subnet / EIP / ACM / Route53 / custom route table / custom NACL すべて <em>不要</em>。
+ただし VPC Block Public Access を ON にする場合は <strong>origin subnet 単位の exclusion 必須</strong>、custom NACL を当てるなら <strong>ingress/egress 共に ephemeral (1024-65535) の TCP 許可</strong>が要る (origin port は不要)。
+</blockquote>
+
+<div class="toc">
+<strong>目次</strong>
+<ol>
+  <li><a href="#min">最小構成 (EC2 単 origin: 8 リソース)</a></li>
+  <li><a href="#defaults">デフォルトで良いもの一覧</a></li>
+  <li><a href="#sg">Security Group ingress: 2 パターン比較</a></li>
+  <li><a href="#bpa">VPC Block Public Access との関係</a></li>
+  <li><a href="#nacl">NACL との関係</a></li>
+  <li><a href="#alb">ALB origin + 2 AZ の場合の差分</a></li>
+  <li><a href="#cost">コスト / 所要時間</a></li>
+  <li><a href="#links">参考リンク</a></li>
+</ol>
+</div>
+
+<h2 id="min">1. 最小構成 (8 リソース)</h2>
+
+<table>
+  <thead>
+    <tr><th>#</th><th>リソース</th><th>用途</th><th>必須度</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td><code>aws_vpc</code></td><td>CIDR 10.0.0.0/16 で 1 VPC</td><td><span class="badge badge-required">必須</span></td></tr>
+    <tr><td>2</td><td><code>aws_internet_gateway</code></td><td>VPC に attach するだけ。route table には載せない (= 実質 private)。AWS Docs の prerequisite で IGW attach 必須と明記</td><td><span class="badge badge-required">必須</span></td></tr>
+    <tr><td>3</td><td><code>aws_subnet</code></td><td>private subnet 1 個 (IPv4)。VPC Origins サポート AZ (ap-northeast-1 では <code>apne1-az3</code> 以外)</td><td><span class="badge badge-required">必須</span></td></tr>
+    <tr><td>4</td><td><code>aws_security_group</code></td><td>EC2 origin に attach する SG</td><td><span class="badge badge-required">必須</span></td></tr>
+    <tr><td>5</td><td><code>aws_vpc_security_group_ingress_rule</code></td><td>CloudFront からの port 80 ingress を許可 (詳細は §3)</td><td><span class="badge badge-required">必須</span></td></tr>
+    <tr><td>6</td><td><code>aws_instance</code></td><td>t4g.nano + AL2023。<code>user_data</code> で <code>python3 -m http.server 80</code> を systemd 起動</td><td><span class="badge badge-required">必須</span></td></tr>
+    <tr><td>7</td><td><code>aws_cloudfront_vpc_origin</code></td><td>EC2 ARN を CloudFront に登録。作成に <strong>9 分前後</strong>かかる</td><td><span class="badge badge-required">必須</span></td></tr>
+    <tr><td>8</td><td><code>aws_cloudfront_distribution</code></td><td>viewer cert は CloudFront default cert (<code>*.cloudfront.net</code>)。作成 3 分前後</td><td><span class="badge badge-required">必須</span></td></tr>
+  </tbody>
+</table>
+
+<div class="figure">
+client (HTTPS) ─→ CloudFront edge ─→ CloudFront VPC Origin
+                                      │
+                                      │ (service-managed ENI、origin subnet と同じ AZ/subnet)
+                                      ▼
+                                 ┌────────────────────────┐
+                                 │ VPC 10.0.0.0/16        │
+                                 │ ┌─ subnet 10.0.1.0/24 ┐│
+                                 │ │ CF managed ENI       ││
+                                 │ │ EC2 (Python 80)      ││
+                                 │ └─────────────────────-┘│
+                                 │ IGW (attach のみ、未使用)│
+                                 │ main route table         │
+                                 │   └ 10.0.0.0/16 → local  │
+                                 └──────────────────────────┘
+</div>
+<p class="caption">図 1: 最小構成のネットワーク図 (IGW は attach 必須だが routing には使われない)</p>
+
+<h2 id="defaults">2. デフォルトで良いもの一覧</h2>
+
+<p>VPC / EC2 / CloudFront それぞれに「これは <em>自分で作らなくて良い</em>」項目が多い。検証で「default のままで疎通成立」を確認したもの:</p>
+
+<table>
+  <thead>
+    <tr><th>項目</th><th>default の中身</th><th>本検証での扱い</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Route table</strong></td>
+      <td>VPC default (main) route table。<code>10.0.0.0/16 → local</code> のみ</td>
+      <td><span class="badge badge-default">default で OK</span> custom RT 不要。IGW を attach してあっても route には載せない</td>
+    </tr>
+    <tr>
+      <td><strong>Network ACL</strong></td>
+      <td>VPC default NACL。in/out 共に <code>0.0.0.0/0</code> を rule 100 で allow、最後に implicit deny</td>
+      <td><span class="badge badge-default">default で OK</span> custom NACL を当てるなら ephemeral allow が必要 (§5)</td>
+    </tr>
+    <tr>
+      <td><strong>DHCP options set</strong></td>
+      <td>VPC 作成時に AWS default が紐付く</td>
+      <td><span class="badge badge-default">default で OK</span></td>
+    </tr>
+    <tr>
+      <td><strong>VPC tenancy</strong></td>
+      <td><code>default</code></td>
+      <td><span class="badge badge-default">default で OK</span></td>
+    </tr>
+    <tr>
+      <td><strong>EC2 IAM role</strong></td>
+      <td>未付与</td>
+      <td><span class="badge badge-default">default で OK</span> SSM 等使わないなら role 不要</td>
+    </tr>
+    <tr>
+      <td><strong>EC2 EBS</strong></td>
+      <td>AMI 既定 (gp3 / 8GB 想定)</td>
+      <td><span class="badge badge-default">default で OK</span></td>
+    </tr>
+    <tr>
+      <td><strong>CloudFront viewer certificate</strong></td>
+      <td><code>cloudfront_default_certificate = true</code> = <code>*.cloudfront.net</code></td>
+      <td><span class="badge badge-default">default で OK</span> 独自ドメイン使わない限り ACM / Route53 不要</td>
+    </tr>
+    <tr>
+      <td><strong>CloudFront cache policy</strong></td>
+      <td>AWS managed の <code>Managed-CachingDisabled</code> / <code>Managed-CachingOptimized</code></td>
+      <td><span class="badge badge-default">default で OK</span> 検証では <code>Managed-CachingDisabled</code> を data で参照</td>
+    </tr>
+    <tr>
+      <td><strong>CloudFront origin <code>domain_name</code></strong></td>
+      <td>API 上は必須フィールドだが、<code>vpc_origin_config</code> 利用時は CloudFront が無視</td>
+      <td><span class="badge badge-default">default で OK</span> <code>placeholder.invalid</code> 等を入れておけば動く</td>
+    </tr>
+    <tr>
+      <td><strong>geo_restriction</strong></td>
+      <td>制限なし (<code>restriction_type = "none"</code>)</td>
+      <td><span class="badge badge-default">default で OK</span></td>
+    </tr>
+    <tr>
+      <td><strong>price class</strong></td>
+      <td><code>PriceClass_All</code></td>
+      <td><span class="badge badge-optional">任意</span> 検証では <code>PriceClass_100</code> でコスト最小化。日本 edge は乗らない</td>
+    </tr>
+    <tr>
+      <td><strong>VPC Block Public Access</strong></td>
+      <td>account / region 単位 <code>off</code></td>
+      <td><span class="badge badge-default">default で OK</span> ON にする運用の場合は §4 参照</td>
+    </tr>
+    <tr>
+      <td><strong>NAT Gateway / EIP / Public subnet</strong></td>
+      <td>—</td>
+      <td><span class="badge badge-default">不要</span> origin は private のまま、egress も不要</td>
+    </tr>
+    <tr>
+      <td><strong>Route53 / ACM</strong></td>
+      <td>—</td>
+      <td><span class="badge badge-default">不要</span> CloudFront default cert + <code>*.cloudfront.net</code> で済む</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="sg">3. Security Group ingress: 2 パターン</h2>
+
+<p>AWS Docs の prerequisite で 2 つの option が示されている。本検証では <strong>両方とも疎通成立を確認</strong>:</p>
+
+<table>
+  <thead>
+    <tr><th>option</th><th>ingress source</th><th>厳しさ</th><th>備考</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>CloudFront managed prefix list <code>com.amazonaws.global.cloudfront.origin-facing</code> (<code>pl-58a04531</code> @ ap-northeast-1)</td>
+      <td>緩</td>
+      <td>全 CloudFront edge IP を許可。VPC Origin 作成前から rule を入れられる</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>service-managed SG <code>CloudFront-VPCOrigins-Service-SG</code> (VPC Origin 作成時に自動生成)</td>
+      <td>厳</td>
+      <td>自分の Distribution 経由のみ許可。<code>data "aws_security_group"</code> + <code>depends_on = [aws_cloudfront_vpc_origin.this]</code> で取得</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>本検証の最終形は option 2 を採用:</p>
+
+<pre><code>data "aws_security_group" "cloudfront_vpc_origin_service" {
+  filter {
+    name   = "group-name"
+    values = ["CloudFront-VPCOrigins-Service-SG"]
+  }
+  filter {
+    name   = "vpc-id"
+    values = [aws_vpc.this.id]
+  }
+  depends_on = [aws_cloudfront_vpc_origin.this]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "origin_http" {
+  security_group_id            = aws_security_group.origin.id
+  ip_protocol                  = "tcp"
+  from_port                    = 80
+  to_port                      = 80
+  referenced_security_group_id = data.aws_security_group.cloudfront_vpc_origin_service.id
+}</code></pre>
+
+<h2 id="bpa">4. VPC Block Public Access との関係</h2>
+
+<p>仮説「CloudFront → VPC Origin は IGW を経由しないので BPA に影響されない」は <span class="ng">外れ</span>。AWS サポート公式回答: <em>実トラフィックは IGW を経由しないが、内部処理のため subnet 単位の BPA 許可 (exclusion) が必要</em>。</p>
+
+<table>
+  <thead>
+    <tr><th>BPA mode</th><th>exclusion (mode = <code>allow-bidirectional</code>)</th><th>curl 結果 (3 回)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>off</code></td><td>—</td><td><span class="ok">HTTP 200</span>, ~0.6s</td></tr>
+    <tr><td><code>block-bidirectional</code></td><td>なし</td><td><span class="ng">HTTP 504</span>, 30s timeout × 3</td></tr>
+    <tr><td><code>block-ingress</code></td><td>なし</td><td><span class="ng">HTTP 504</span>, 30s timeout × 3</td></tr>
+    <tr><td><code>block-ingress</code></td><td>VPC 単位</td><td><span class="ok">HTTP 200</span>, ~0.6s</td></tr>
+    <tr><td><code>block-ingress</code></td><td><strong>subnet 単位 (origin subnet のみ)</strong></td><td><span class="ok">HTTP 200</span>, ~0.6s</td></tr>
+  </tbody>
+</table>
+
+<blockquote>
+<strong>結論</strong>: 「アカウント全体に BPA を ON、VPC Origin を置く subnet だけ exclusion」が最小権限的な運用。VPC 全体を許可する必要はない。
+</blockquote>
+
+<h2 id="nacl">5. NACL との関係</h2>
+
+<p>AWS Docs:</p>
+<blockquote>VPC origins ... NACLs: Subnet-level allow and deny rules are not evaluated for this traffic.</blockquote>
+<p>→ 実機では <strong>評価される</strong> (deny-all NACL で 504)。詳細試験:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>ingress tcp 80</th>
+      <th>ingress tcp 1024-65535</th>
+      <th>egress tcp 80</th>
+      <th>egress tcp 1024-65535</th>
+      <th>curl</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>A</td><td>—</td><td>—</td><td>—</td><td>—</td><td><span class="ng">504</span></td></tr>
+    <tr><td>B</td><td>✓</td><td>—</td><td>—</td><td>—</td><td><span class="ng">504</span></td></tr>
+    <tr><td>D</td><td>✓</td><td>—</td><td>—</td><td>✓</td><td><span class="ng">504</span></td></tr>
+    <tr><td>I</td><td>—</td><td>✓</td><td>—</td><td>—</td><td><span class="ng">504</span></td></tr>
+    <tr><td>J</td><td>—</td><td>—</td><td>—</td><td>✓</td><td><span class="ng">504</span></td></tr>
+    <tr><td><strong>H</strong></td><td>—</td><td><strong>✓</strong></td><td>—</td><td><strong>✓</strong></td><td><span class="ok">200</span> ← 最小</td></tr>
+    <tr><td>F</td><td>✓</td><td>✓</td><td>—</td><td>✓</td><td><span class="ok">200</span></td></tr>
+    <tr><td>E</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td><span class="ok">200</span></td></tr>
+  </tbody>
+</table>
+
+<p><strong>最小 NACL allow set</strong>:</p>
+<ul class="compact">
+  <li><code>ingress tcp dst 1024-65535</code></li>
+  <li><code>egress  tcp dst 1024-65535</code></li>
+</ul>
+<p>origin port (80 / 443) は ingress / egress 共に <strong>不要</strong>。</p>
+
+<p>考察 (実機 ENI 配置から):</p>
+<ul class="compact">
+  <li>CloudFront 管理 ENI (<code>InterfaceType: cloudfront_managed</code>) と EC2 ENI は <strong>同じ subnet</strong> にいる</li>
+  <li>subnet 内 hop (CF ENI ↔ EC2 ENI, dst port 80) の packet は NACL に当たらない</li>
+  <li>NACL に当たるのは CF ENI ↔ 外部 CloudFront edge plane の internal protocol。両側 ephemeral port を使う模様</li>
+  <li>よって request の dst port 80 すら NACL ingress には不要</li>
+</ul>
+
+<h2 id="alb">6. ALB origin + 2 AZ の場合の差分</h2>
+
+<p>本番運用想定で <strong>ALB + 2 AZ private subnet</strong> 構成も別 approach (<code>02-alb-2az/</code>) で実機検証。</p>
+
+<h3>構成差分</h3>
+<table>
+  <thead><tr><th>項目</th><th>01 (EC2 直 origin)</th><th>02 (ALB origin + 2 AZ)</th></tr></thead>
+  <tbody>
+    <tr><td>subnet 数</td><td>1</td><td>2 (ALB の HA 要件、別 AZ)</td></tr>
+    <tr><td>SG 段数</td><td>1 段 (CF service SG → EC2)</td><td>2 段 (CF service SG → ALB → EC2)</td></tr>
+    <tr><td>terraform リソース数</td><td>8</td><td>16</td></tr>
+    <tr><td>VPC Origin が指す対象</td><td>EC2 ARN</td><td>ALB ARN</td></tr>
+    <tr><td>CloudFront 管理 ENI</td><td>1 個 (origin subnet)</td><td><strong>2 個 (両 AZ subnet に 1 個ずつ)</strong></td></tr>
+    <tr><td>apply 所要時間</td><td>約 12 分</td><td>約 15 分 (ALB 3 分追加)</td></tr>
+  </tbody>
+</table>
+
+<h3>BPA exclusion の挙動 (subnet 単位試験)</h3>
+<table>
+  <thead>
+    <tr><th>BPA mode</th><th>exclusion subnet a</th><th>exclusion subnet b</th><th>curl</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>off</code></td><td>—</td><td>—</td><td><span class="ok">200</span> (baseline)</td></tr>
+    <tr><td><code>block-ingress</code></td><td>—</td><td>—</td><td><span class="ng">504</span> (4/4)</td></tr>
+    <tr><td><code>block-ingress</code></td><td><strong>✓</strong></td><td>—</td><td><span class="partial">200 (6/6)</span></td></tr>
+    <tr><td><code>block-ingress</code></td><td>—</td><td><strong>✓</strong></td><td><span class="partial">200 (6/6)</span></td></tr>
+    <tr><td><code>block-ingress</code></td><td>✓</td><td>✓</td><td><span class="ok">200</span> (4/4)</td></tr>
+  </tbody>
+</table>
+
+<blockquote>
+<strong>発見</strong>: 2 AZ ALB 構成では <strong>片方の subnet だけ exclusion すれば疎通成立</strong>。CloudFront edge が許可された CF ENI を選択して使う模様 (failover 的挙動)。<br/>
+ただし運用上は <strong>両 subnet exclusion を推奨</strong> (片 AZ 障害時の through-traffic 維持のため)。
+</blockquote>
+
+<h3>NACL の挙動</h3>
+<p>両 subnet に同一 custom NACL を associate して試験 → 01-ec2-minimal と <strong>同じ</strong> 結論:</p>
+<ul class="compact">
+  <li>deny-all (rule なし) → <span class="ng">504</span></li>
+  <li>ingress tcp 1024-65535 + egress tcp 1024-65535 のみ → <span class="ok">200</span></li>
+</ul>
+<p>origin port (80 / 443) は ingress / egress どちらにも不要、という結論は ALB origin / 2 AZ でも変わらない。</p>
+
+<h2 id="cost">7. コスト / 所要時間</h2>
+
+<table>
+  <thead><tr><th>項目</th><th>実測</th></tr></thead>
+  <tbody>
+    <tr><td>terraform apply (8 resource)</td><td>約 12 分 (VPC Origin 9 分 + Distribution 3 分が支配)</td></tr>
+    <tr><td>terraform destroy</td><td>15〜20 分 (Distribution の disable→delete が支配)</td></tr>
+    <tr><td>EC2 t4g.nano 30 分</td><td>~$0.002</td></tr>
+    <tr><td>CloudFront リクエスト数十件</td><td>無視できる ($0.001 未満)</td></tr>
+    <tr><td>VPC BPA on/off</td><td>料金なし (API 操作のみ)</td></tr>
+    <tr><td><strong>合計</strong></td><td><strong>$0.05 未満</strong> (検証 1 セッション)</td></tr>
+  </tbody>
+</table>
+
+<h2 id="links">8. 参考リンク</h2>
+<ul>
+  <li><a href="https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html">Restrict access with VPC origins — Amazon CloudFront</a></li>
+  <li><a href="https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/LocationsOfEdgeServers.html#managed-prefix-list">CloudFront managed prefix list</a></li>
+  <li><a href="https://docs.aws.amazon.com/vpc/latest/userguide/security-vpc-bpa.html">Block public access to VPCs and subnets — VPC User Guide</a></li>
+  <li>本 sandbox README: <code>sandboxes/20260602-cloudfront-vpc-origin-minimal/README.md</code></li>
+  <li>本 sandbox runbook: <code>sandboxes/20260602-cloudfront-vpc-origin-minimal/01-ec2-minimal/runbook.md</code></li>
+</ul>
+
+</body>
+</html>
