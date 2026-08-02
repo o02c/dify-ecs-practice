@@ -1,0 +1,16 @@
+# ecspresso: task definition と ECS service(サービス以下)を管理する。
+# subnet / SG / TG ARN / ECR URL / log group / role は Terraform が作り、
+# tfstate プラグインで S3 remote backend の state を直接参照する。
+# S3 参照なので、ローカルでも CodeBuild (VPC モード) でも同じ config で deploy できる
+# (tfstate 関数は service/task definition 側でのみ使える。config 本体は静的に書く)。
+region: ap-northeast-1
+cluster: ecs-ecspresso-cf
+service: ecs-ecspresso-cf
+service_definition: ecs-service-def.json
+task_definition: ecs-task-def.json
+
+plugins:
+  - name: tfstate
+    config:
+      # S3 参照は path: ではなく url: で渡す (path: だと s3:// がファイルパス扱いで潰れる)
+      url: s3://ecs-ecspresso-cf-tfstate-example/20260802-ecs-ecspresso-cloudfront/terraform.tfstate
