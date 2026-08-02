@@ -1,0 +1,28 @@
+# CodeBuild (VPC モード) の deploy パイプライン。
+# 環境変数 (ECR_REPO_URI / IMAGE_TAG / FRONTEND_BUCKET / AWS_DEFAULT_REGION) は
+# codebuild.tf の environment_variable から注入される。
+# deploy.zip の中身: image.tar / assets/ / ecspresso/ / bin/ecspresso (linux amd64)
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      # pipefail: get-login-password が失敗しても docker login が 0 を返す事故を防ぐ
+      - set -o pipefail
+      - echo "ECR login via VPC endpoint..."
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "${ECR_REPO_URI%%/*}"
+  build:
+    commands:
+      - set -o pipefail
+      - echo "1) load image (no build) and push to ECR"
+      - docker load -i image.tar
+      - docker tag app:latest "$ECR_REPO_URI:$IMAGE_TAG"
+      - docker push "$ECR_REPO_URI:$IMAGE_TAG"
+      - echo "2) sync frontend assets to S3"
+      # --delete は assets/ が空だと bucket を全消しするので、非空を確認してから sync
+      - test -n "$(ls -A assets/ 2>/dev/null)" || { echo "assets/ is empty, refusing --delete"; exit 1; }
+      - aws s3 sync assets/ "s3://$FRONTEND_BUCKET/" --delete
+  post_build:
+    commands:
+      - echo "3) ecspresso deploy (taskdef + service) via VPC endpoints"
+      - chmod +x bin/ecspresso
+      - ./bin/ecspresso deploy --config ecspresso/ecspresso.yml --force-new-deployment

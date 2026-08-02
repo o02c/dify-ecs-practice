@@ -1,0 +1,28 @@
+{
+  "launchType": "FARGATE",
+  "desiredCount": 1,
+  "deploymentConfiguration": {
+    "minimumHealthyPercent": 100,
+    "maximumPercent": 200
+  },
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "subnets": [
+        "{{ tfstate `aws_subnet.private["a"].id` }}",
+        "{{ tfstate `aws_subnet.private["b"].id` }}"
+      ],
+      "securityGroups": [
+        "{{ tfstate `aws_security_group.task.id` }}"
+      ],
+      "assignPublicIp": "DISABLED"
+    }
+  },
+  "loadBalancers": [
+    {
+      "targetGroupArn": "{{ tfstate `aws_lb_target_group.this.arn` }}",
+      "containerName": "app",
+      "containerPort": 80
+    }
+  ],
+  "healthCheckGracePeriodSeconds": 30
+}
