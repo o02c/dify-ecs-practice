@@ -276,11 +276,41 @@ B が違うのは「有効化の経路・スコープ・ロック」だけ。
   自動再作成のトリガー/遅延は未確定(顧客が管理していた endpoint を消した扱いの可能性)。
 - **具体 IAM action**: 自動作成は SLR `AWSServiceRoleForAmazonGuardDuty` 経由だが、
   `ec2:CreateVpcEndpoint` 等の個別 action は doc で明示確認できておらず推定。
-- **Transit Gateway 集約構成**: 下記「TGW 集約構成での考察」を参照(doc 調査ベース・実機未検証)。
+- **Transit Gateway 集約構成**: 下記「TGW 集約構成での考察」で**実機検証済み(2026-08-28)**。
+  結論=動かない(GuardDuty は中央 endpoint/PHZ を使わず spoke 自身に作ろうとして失敗)。
 
 ## TGW 集約構成での考察(interface endpoint を中央 VPC に集約する構成)
 
-> doc 調査ベース(実機未検証)。結論: **`guardduty-data` は中央集約できない**が実害は小さい。
+> **実機検証済み(2026-08-28)** + doc 調査。結論: **`guardduty-data` の TGW 集約は動かない**。
+> GuardDuty はテレメトリ endpoint を必ず**ワークロード(spoke)VPC 自身**に作ろうとし、
+> 中央 endpoint / PHZ を一切使わない。
+
+### 実機検証(2026-08-28): TGW+PHZ で中央 endpoint に寄せても動かない
+
+構成(`tgw-experiment/`): spoke VPC(`enableDnsHostnames=false` で GuardDuty のローカル自動作成を
+抑止・endpoint 無し・public IP で image pull)+ central VPC(guardduty-data endpoint / private DNS
+off)+ TGW 接続 + Route53 PHZ(`guardduty-data.<region>.amazonaws.com` → central endpoint に ALIAS,
+spoke に association)。GuardDuty automated agent 有効化。
+
+観測結果:
+- **GuardDuty は PHZ / 中央 endpoint を使わず、spoke VPC 自身に endpoint を作ろうとして失敗**。
+  coverage UNHEALTHY、Issue(そのまま):
+  > `Agent not reporting : VPC Endpoint Creation Failed: Enabling private DNS requires both
+  > enableDnsSupport and enableDnsHostnames VPC attributes set to true for vpc-xxxx(spoke);
+  > for task(s) in TaskDefinition - 'gd-tgw:1'`
+- **サイドカー自体は注入される**(`aws-guardduty-agent-*` が付く。ただし force-new-deployment を
+  **2 回**要した。1 回目の redeploy では付かず、2 回目で注入。coverage は一時的に HEALTHY を返す
+  ノイズもあった=eventual consistency)。
+- spoke VPC の guardduty-data endpoint は**最後まで `[]`**(= GuardDuty が中央を使わず自 VPC 作成を
+  試み、`enableDnsHostnames=false` で失敗し続けた。中央の endpoint は素通り)。
+
+→ **doc の "GuardDuty doesn't support creating a VPC endpoint only for the centralized VPC" は、
+実機ではこう現れる**: GuardDuty はサイドカーのテレメトリ送信先を**必ずワークロード VPC に自分で
+作成**しようとし、PHZ で中央 endpoint に向けても認識しない。よって TGW ハブ&スポークで
+guardduty-data を中央集約する余地は無い。`enableDnsHostnames=true` にすれば GuardDuty は spoke に
+ローカル endpoint を作る(= 集約でなく各 VPC ローカル)。どちらにせよ「中央 1 本」にはできない。
+
+### 結論: guardduty-data の中央集約は非サポート(DOCUMENTED・明記あり)
 
 ### 結論: guardduty-data の中央集約は非サポート(DOCUMENTED・明記あり)
 
@@ -346,8 +376,9 @@ GuardDuty Fargate の公式ページに直接の記述がある:
 - **INFERRED/SILENT**: **顧客自作 endpoint の課金は明示なし**(通常 PrivateLink 課金と推定・高信頼) /
   「無料」が PrivateLink 時間/データ課金の waive を指すかの分解は SILENT。
 - **INFERRED**: この単純な request/response フローに TGW appliance-mode は不要(一般挙動からの推定)。
-- **SILENT(前提にしない)**: `guardduty-data` を PHZ で中央 endpoint に向ける手段 / GuardDuty 固有の
-  MTU 制約。
+- **実機実証(2026-08-28)**: `guardduty-data` を PHZ で中央 endpoint に向けても GuardDuty は使わず、
+  spoke VPC 自身に作成を試み `VPC Endpoint Creation Failed` で UNHEALTHY(doc SILENT だった部分を実機で
+  埋めた)。→ **TGW 集約は動かない**で確定。
 
 ## 関連リンク
 
