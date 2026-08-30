@@ -36,8 +36,10 @@
 | #  | Approach            | 概要                                                                                              | 結果    |
 |----|---------------------|---------------------------------------------------------------------------------------------------|---------|
 | 01 | fargate-ecspresso   | TF=土台 / ecspresso=taskdef+service。1 CloudFront で `/*`→S3(OAC)、`/api/*`→VPC Origin→ALB→Fargate。イメージは CodeBuild(VPC)で S3 zip → load → ECR push | 成功 |
+| 02 | fargate-runtime-monitoring | GuardDuty ECS Fargate ランタイムモニタリングの必須条件・有効化時の挙動・充足確認方法を、01 から監視観測に不要な層を削った最小版(private Fargate)で実機検証。監視は別モジュール + `verify-coverage.sh` 診断。 | 成功 |
 
-詳細は [`01-fargate-ecspresso/runbook.md`](01-fargate-ecspresso/runbook.md) を参照。
+詳細は [`01-fargate-ecspresso/runbook.md`](01-fargate-ecspresso/runbook.md) /
+[`02-fargate-runtime-monitoring/runbook.md`](02-fargate-runtime-monitoring/runbook.md) を参照。
 
 ## 結論 / 学び
 
