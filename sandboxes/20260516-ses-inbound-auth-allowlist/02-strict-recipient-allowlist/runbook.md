@@ -22,8 +22,8 @@ Receipt Rule Set
 ```
 
 01 との差分:
-- **`archive-all` (catchall) rule を削除**: `*@o2c.click` を網羅する rule なし
-- **`recipients` に許可アドレスを明示列挙**: 例 `["inbox@o2c.click", "alerts@o2c.click"]`
+- **`archive-all` (catchall) rule を削除**: `*@example.com` を網羅する rule なし
+- **`recipients` に許可アドレスを明示列挙**: 例 `["inbox@example.com", "alerts@example.com"]`
 - 列挙外のアドレス宛メールは SES SMTP 中 reject → 課金なし、CloudWatch `Received` メトリクスにも乗らない
 - archive は許可アドレスにマッチしたメールのみ (S3 deliver action を同じ rule の 1 番目に置く)
 
@@ -31,7 +31,7 @@ Receipt Rule Set
 
 - `AWS_PROFILE=terraform`
 - 既存 active receipt rule set がないこと
-- `o2c.click` の Hosted Zone は前 sandbox の destroy で消えているので新規作成 (DNS 伝播待ち発生)
+- `example.com` の Hosted Zone は前 sandbox の destroy で消えているので新規作成 (DNS 伝播待ち発生)
 
 ## 手順
 
@@ -44,25 +44,25 @@ terraform plan
 terraform apply
 ```
 
-terraform variable `allowed_recipients` に列挙したいアドレスのリストを渡す。デフォルトは `["inbox@o2c.click"]` のみ。複数欲しいなら `terraform.tfvars` で:
+terraform variable `allowed_recipients` に列挙したいアドレスのリストを渡す。デフォルトは `["inbox@example.com"]` のみ。複数欲しいなら `terraform.tfvars` で:
 
 ```hcl
-allowed_recipients = ["inbox@o2c.click", "alerts@o2c.click"]
+allowed_recipients = ["inbox@example.com", "alerts@example.com"]
 ```
 
 ### 2. DNS 伝播待ち + SES verification
 
 ```sh
-dig +short MX o2c.click @8.8.8.8
-aws sesv2 get-email-identity --email-identity o2c.click --region ap-northeast-1 \
+dig +short MX example.com @8.8.8.8
+aws sesv2 get-email-identity --email-identity example.com --region ap-northeast-1 \
   --query '{V:VerifiedForSendingStatus,D:DkimAttributes.Status}'
 ```
 
 ### 3. テスト (gmail から実機送信)
 
 ユーザー依頼:
-- 「Gmail から `inbox@o2c.click` 宛に送信」 → ACCEPTED 期待
-- 「Gmail から `random@o2c.click` 宛に送信」 → **gmail 側で配信失敗の DSN が返るはず** (SES が SMTP RCPT TO 段階で 550 を返す)
+- 「Gmail から `inbox@example.com` 宛に送信」 → ACCEPTED 期待
+- 「Gmail から `random@example.com` 宛に送信」 → **gmail 側で配信失敗の DSN が返るはず** (SES が SMTP RCPT TO 段階で 550 を返す)
 
 ### 4. 課金回避の検証
 
@@ -114,5 +114,5 @@ Lambda の CloudWatch Log Group は本 sandbox では terraform 管理してい�
 ## メモ
 
 - 「列挙外は受信前 SMTP reject = 無料」が 01 の catchall 構成と一番違うところ
-- 後追い調査 (誰が `bbb@o2c.click` に送ろうとしたか) が必要なケースは catchall + archive を使う (01 アプローチ) ことになる。トレードオフ
+- 後追い調査 (誰が `bbb@example.com` に送ろうとしたか) が必要なケースは catchall + archive を使う (01 アプローチ) ことになる。トレードオフ
 - 許可アドレスを増やすには `allowed_recipients` を変更して `terraform apply` するだけ (Lambda の env var ALLOW_LIST_DOMAINS とは別軸)

@@ -5,17 +5,17 @@
 ## 概要
 
 ```
-                                  +-- Rule "archive-all"   recipients=[o2c.click]      → S3 Bucket (全メール永続化)
+                                  +-- Rule "archive-all"   recipients=[example.com]      → S3 Bucket (全メール永続化)
                                   |
-SES Receipt Rule Set (順序付き) --+-- Rule "process-inbox"  recipients=[inbox@o2c.click] → SNS Topic → Lambda → CW Logs
+SES Receipt Rule Set (順序付き) --+-- Rule "process-inbox"  recipients=[inbox@example.com] → SNS Topic → Lambda → CW Logs
                                   |                                                              └→ (失敗時) SQS DLQ
                                   |
-                                  +-- Rule "drop-noreply"   recipients=[noreply@o2c.click] → Bounce + Stop Rule Set
+                                  +-- Rule "drop-noreply"   recipients=[noreply@example.com] → Bounce + Stop Rule Set
 ```
 
 - 全メールは Rule 1 で必ず S3 にアーカイブされる (`inbox/<messageId>`)
-- `inbox@o2c.click` 宛は Rule 2 で SNS → Lambda 処理 (Rule 1 とアクションが両方走る)
-- `noreply@o2c.click` 宛は Rule 1 でアーカイブされた後、Rule 3 でバウンスして停止
+- `inbox@example.com` 宛は Rule 2 で SNS → Lambda 処理 (Rule 1 とアクションが両方走る)
+- `noreply@example.com` 宛は Rule 1 でアーカイブされた後、Rule 3 でバウンスして停止
 - Lambda が 3 回失敗したら SNS subscription redrive で SQS DLQ に退避
 - CloudWatch アラームで `Lambda Errors` / `DLQ depth` / `SNS NumberOfNotificationsFailed` を監視 (alerts SNS topic に通知)
 
@@ -61,21 +61,21 @@ terraform state rm \
 # D. 02 に import
 cd ../../02-multi-recipient-archive-dlq/terraform
 
-ZONE_ID=$(aws route53 list-hosted-zones --query 'HostedZones[?Name==`o2c.click.`].Id' --output text | sed 's|/hostedzone/||')
+ZONE_ID=$(aws route53 list-hosted-zones --query 'HostedZones[?Name==`example.com.`].Id' --output text | sed 's|/hostedzone/||')
 
 terraform import aws_route53_zone.main "$ZONE_ID"
-terraform import aws_route53domains_registered_domain.main o2c.click
-terraform import aws_ses_domain_identity.main o2c.click
-terraform import aws_ses_domain_dkim.main o2c.click
-terraform import aws_route53_record.amazonses_verification "${ZONE_ID}__amazonses.o2c.click_TXT"
-terraform import aws_route53_record.mx "${ZONE_ID}_o2c.click_MX"
+terraform import aws_route53domains_registered_domain.main example.com
+terraform import aws_ses_domain_identity.main example.com
+terraform import aws_ses_domain_dkim.main example.com
+terraform import aws_route53_record.amazonses_verification "${ZONE_ID}__amazonses.example.com_TXT"
+terraform import aws_route53_record.mx "${ZONE_ID}_example.com_MX"
 
 # DKIM tokens は SES から取得して順番に import
-TOKENS=($(aws sesv2 get-email-identity --email-identity o2c.click --region ap-northeast-1 \
+TOKENS=($(aws sesv2 get-email-identity --email-identity example.com --region ap-northeast-1 \
   --query 'DkimAttributes.Tokens' --output text))
 for i in 0 1 2; do
   terraform import "aws_route53_record.dkim[$i]" \
-    "${ZONE_ID}_${TOKENS[$i]}._domainkey.o2c.click_CNAME"
+    "${ZONE_ID}_${TOKENS[$i]}._domainkey.example.com_CNAME"
 done
 
 # E. plan で diff ゼロを確認
@@ -103,9 +103,9 @@ terraform output `test_commands` で各 recipient へのテスト送信コマン
 期待動作:
 | 宛先              | S3 archive | Lambda 起動 | バウンス |
 | ----------------- | ---------- | ----------- | -------- |
-| inbox@o2c.click   | YES        | YES         | NO       |
-| random@o2c.click  | YES        | NO          | NO       |
-| noreply@o2c.click | YES        | NO          | YES      |
+| inbox@example.com   | YES        | YES         | NO       |
+| random@example.com  | YES        | NO          | NO       |
+| noreply@example.com | YES        | NO          | YES      |
 
 DLQ 動作確認は Lambda コードを一時的に `raise Exception` するように差し替えて test 送信 → 数分後に DLQ に payload が溜まるはず。
 
@@ -131,11 +131,11 @@ terraform destroy
 
 | 宛先              | S3 archive | Lambda 起動 | バウンス reply | 観測結果 |
 | ----------------- | ---------- | ----------- | -------------- | -------- |
-| inbox@o2c.click   | YES        | YES         | NO             | ✓        |
-| random@o2c.click  | YES        | NO          | NO             | ✓        |
-| noreply@o2c.click | YES        | NO          | YES (550 5.1.1) | ✓        |
+| inbox@example.com   | YES        | YES         | NO             | ✓        |
+| random@example.com  | YES        | NO          | NO             | ✓        |
+| noreply@example.com | YES        | NO          | YES (550 5.1.1) | ✓        |
 
-S3 アーカイブには 4 オブジェクトが入った (3 つのテスト + noreply テストが返したバウンス reply が `test@o2c.click` に届いて再 archive)。
+S3 アーカイブには 4 オブジェクトが入った (3 つのテスト + noreply テストが返したバウンス reply が `test@example.com` に届いて再 archive)。
 Lambda ログには `inbox test v2` のみ。DLQ 残量 0。
 
 ## 考察
@@ -152,5 +152,5 @@ Lambda ログには `inbox test v2` のみ。DLQ 残量 0。
 
 ### 次にやるなら
 - Lambda コードを一時的に `raise Exception` にして 3 回リトライ後 DLQ に payload が落ちるかを実測
-- `noreply` の bounce action 受け取り側 (test@o2c.click) を SES の自動応答ではなく外部 Gmail にすると、より現実的な挙動になる
+- `noreply` の bounce action 受け取り側 (test@example.com) を SES の自動応答ではなく外部 Gmail にすると、より現実的な挙動になる
 - 150KB 超のメール (添付付き) を archive 経由で受けて、SNS publish 側は当然失敗するが S3 にはちゃんと残る、を実証

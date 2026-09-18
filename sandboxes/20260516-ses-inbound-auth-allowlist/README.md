@@ -22,7 +22,7 @@
 
 ## 検証環境
 
-- Domain: `o2c.click` (20260512 の sandbox で destroy 済 → 新規に Hosted Zone 作り直し)
+- Domain: `example.com` (20260512 の sandbox で destroy 済 → 新規に Hosted Zone 作り直し)
 - Region: `ap-northeast-1`
 - AWS Profile: `terraform`
 - 受信したメールは Lambda で 3 段判定 → 通過したものだけ MIME パースして CW Logs に出力

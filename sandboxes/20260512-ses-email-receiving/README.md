@@ -17,7 +17,7 @@ SES のメール受信機能は東京リージョン (`ap-northeast-1`) でも 2
 
 ## 検証環境
 
-- Domain: `o2c.click` (Route53 Domains 登録済み、未使用)
+- Domain: `example.com` (Route53 Domains 登録済み、未使用)
 - Region: `ap-northeast-1`
 - AWS Profile: `terraform`
 - 受信したメールは Lambda で MIME パース → CloudWatch Logs にヘッダと本文先頭を書き出す (副作用なし、検証用)

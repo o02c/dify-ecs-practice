@@ -32,7 +32,7 @@ S3 ObjectCreated event を trigger に Lambda が起動する構成。SES SNS pu
 
 - `AWS_PROFILE=terraform`
 - 既存 active receipt rule set がないこと
-- `o2c.click` の Hosted Zone は前 sandbox の destroy で消えているので新規作成 → DNS 伝播待ち発生
+- `example.com` の Hosted Zone は前 sandbox の destroy で消えているので新規作成 → DNS 伝播待ち発生
 
 ## 手順
 
@@ -48,14 +48,14 @@ terraform apply
 ### 2. DNS 伝播 + SES verification 待ち
 
 ```sh
-dig +short MX o2c.click @8.8.8.8
-aws sesv2 get-email-identity --email-identity o2c.click --region ap-northeast-1 \
+dig +short MX example.com @8.8.8.8
+aws sesv2 get-email-identity --email-identity example.com --region ap-northeast-1 \
   --query '{V:VerifiedForSendingStatus,D:DkimAttributes.Status}'
 ```
 
 ### 3. テスト送信
 
-Gmail から `inbox@o2c.click` 宛にテスト送信。
+Gmail から `inbox@example.com` 宛にテスト送信。
 
 期待ログ (`/aws/lambda/ses-inbound-v4-processor`):
 ```

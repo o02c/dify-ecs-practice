@@ -13,5 +13,5 @@ variable "sandbox_name" {
 variable "domain" {
   description = "受信対象ドメイン。Route53 Domains 登録済みであること。"
   type        = string
-  default     = "o2c.click"
+  default     = "example.com"
 }

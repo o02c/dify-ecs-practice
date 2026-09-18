@@ -13,13 +13,13 @@ variable "sandbox_name" {
 variable "domain" {
   description = "受信対象ドメイン"
   type        = string
-  default     = "o2c.click"
+  default     = "example.com"
 }
 
 variable "allowed_recipients" {
   description = "受信を許可するフルアドレスのリスト。ここに列挙したアドレス宛 のみ Receipt Rule が match する。列挙外は SES SMTP 中 reject で課金されない。"
   type        = list(string)
-  default     = ["inbox@o2c.click"]
+  default     = ["inbox@example.com"]
 }
 
 variable "allow_list_domains" {

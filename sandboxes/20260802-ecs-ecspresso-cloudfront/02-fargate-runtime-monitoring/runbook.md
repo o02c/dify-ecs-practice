@@ -1,7 +1,7 @@
 # 02 GuardDuty ECS Fargate Runtime Monitoring — 条件 / 挙動 / 確認方法
 
 > 検証日: 2026-08-27
-> Region: ap-northeast-1 / Account: 654654512164(スタンドアロン)
+> Region: ap-northeast-1 / Account: <account-id>(スタンドアロン)
 > 目的: 別アカウント(管理アカウントから組織自動有効)で「Fargate のランタイム
 > モニタリングが有効になっていない」と指摘を受けた。**必須条件**・**有効化時の挙動**・
 > **本番向けの充足確認方法**を、単一アカウントで再現して確定する。

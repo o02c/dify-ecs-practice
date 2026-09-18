@@ -28,9 +28,9 @@ module "ses_inbound" {
 
   name   = "ses-inbound-v3"
   region = "ap-northeast-1"
-  domain = "o2c.click"
+  domain = "example.com"
 
-  allowed_recipients = ["inbox@o2c.click"]
+  allowed_recipients = ["inbox@example.com"]
   allow_list_domains = ["gmail.com"]
 
   enable_killswitch               = true

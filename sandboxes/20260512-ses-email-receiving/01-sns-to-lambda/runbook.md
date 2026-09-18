@@ -7,11 +7,11 @@ SES Receipt Rule の SNS action でメール全体を SNS topic に publish し�
 ```
 [sender] --SMTP-->  inbound-smtp.ap-northeast-1.amazonaws.com
                               |
-                       (MX o2c.click)
+                       (MX example.com)
                               |
                   +-----------v-----------+
                   | SES Receipt Rule Set  |
-                  | recipients: o2c.click  |
+                  | recipients: example.com  |
                   +-----------+-----------+
                               |
                        SNS Publish (UTF-8)
@@ -34,7 +34,7 @@ SES Receipt Rule の SNS action でメール全体を SNS topic に publish し�
 ## 前提
 
 - `AWS_PROFILE=terraform` で credential 設定済み
-- `o2c.click` が Route53 Domains に登録済み (確認済み)
+- `example.com` が Route53 Domains に登録済み (確認済み)
 - 既存の active receipt rule set がないこと (上書きされる)。確認:
   ```sh
   aws ses describe-active-receipt-rule-set --region ap-northeast-1
@@ -53,13 +53,13 @@ terraform apply
 
 terraform 内で以下を作成・設定する:
 
-1. Route53 Hosted Zone (`o2c.click`)
+1. Route53 Hosted Zone (`example.com`)
 2. Route53 Domains の name_server を hosted zone の NS に同期 (registrar 側委任)
 3. SES Domain Identity + Easy DKIM
-4. Route53 レコード: `_amazonses.o2c.click` TXT (identity verification) / DKIM CNAME ×3 / MX
+4. Route53 レコード: `_amazonses.example.com` TXT (identity verification) / DKIM CNAME ×3 / MX
 5. SNS Topic + topic policy (SES から publish 許可)
 6. Lambda + IAM role / SNS subscription / SNS → Lambda invoke 許可
-7. SES Receipt Rule Set + Active 化 + Receipt Rule (recipients=`["o2c.click"]`, SNS action)
+7. SES Receipt Rule Set + Active 化 + Receipt Rule (recipients=`["example.com"]`, SNS action)
 
 ### 2. NS 委任の伝播待ち
 
@@ -67,7 +67,7 @@ Route53 Domains の name_server 更新は数分〜数十分で反映される。
 
 ```sh
 # レジストリ側 (権威 NS) の確認
-dig +short NS o2c.click @8.8.8.8
+dig +short NS example.com @8.8.8.8
 
 # 期待: awsdns-*.{org,co.uk,com,net} の 4 件 (Route53 Hosted Zone の NS)
 ```
@@ -78,7 +78,7 @@ DKIM CNAME と `_amazonses` TXT が DNS で引けるようになったら SES �
 
 ```sh
 aws sesv2 get-email-identity \
-  --email-identity o2c.click \
+  --email-identity example.com \
   --region ap-northeast-1 \
   --query '{Verified:VerifiedForSendingStatus, DkimStatus:DkimAttributes.Status}'
 ```
@@ -87,7 +87,7 @@ aws sesv2 get-email-identity \
 
 ### 4. テストメール送信
 
-外部のメールアドレス (gmail 等) から `test@o2c.click` 宛にメールを送る。
+外部のメールアドレス (gmail 等) から `test@example.com` 宛にメールを送る。
 件名・本文に識別できる文字列を入れておく。
 
 ### 5. Lambda のログ確認
@@ -121,19 +121,19 @@ destroy 前に他のサービスで使う予定があれば name_server を別�
 ### テストメール (自アカウント SES から自ドメインへ送信)
 ```sh
 aws sesv2 send-email --region ap-northeast-1 \
-  --from-email-address "no-reply@o2c.click" \
-  --destination "ToAddresses=inbox@o2c.click" \
+  --from-email-address "no-reply@example.com" \
+  --destination "ToAddresses=inbox@example.com" \
   --content 'Simple={Subject={Data="...",Charset="UTF-8"},Body={Text={Data="日本語本文...",Charset="UTF-8"}}}'
 ```
 
 Lambda ログ抜粋:
 ```
 messageId=ad582otrfn180bs4e2a7ecliv8drib8u62bgce01
-destinations=['inbox@o2c.click']
+destinations=['inbox@example.com']
 spamVerdict=PASS virusVerdict=PASS spfVerdict=PASS dkimVerdict=GRAY dmarcVerdict=GRAY
 Subject: SES receive sandbox test
-From: no-reply@o2c.click
-To: inbox@o2c.click
+From: no-reply@example.com
+To: inbox@example.com
 Body preview:
 これは SES → SNS → Lambda の動作確認用テストです。
 日本語本文も含む。

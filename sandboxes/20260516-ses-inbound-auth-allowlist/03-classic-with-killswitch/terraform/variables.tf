@@ -10,12 +10,12 @@ variable "sandbox_name" {
 
 variable "domain" {
   type    = string
-  default = "o2c.click"
+  default = "example.com"
 }
 
 variable "allowed_recipients" {
   type    = list(string)
-  default = ["inbox@o2c.click"]
+  default = ["inbox@example.com"]
 }
 
 variable "allow_list_domains" {

@@ -13,13 +13,13 @@ variable "sandbox_name" {
 variable "domain" {
   description = "受信対象ドメイン"
   type        = string
-  default     = "o2c.click"
+  default     = "example.com"
 }
 
 variable "process_recipient" {
   description = "Lambda 処理対象のフルアドレス"
   type        = string
-  default     = "inbox@o2c.click"
+  default     = "inbox@example.com"
 }
 
 variable "allow_list_domains" {

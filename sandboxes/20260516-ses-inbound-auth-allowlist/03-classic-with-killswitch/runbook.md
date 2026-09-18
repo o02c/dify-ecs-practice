@@ -58,7 +58,7 @@ terraform apply
 ```
 
 主要な変数 (`variables.tf`):
-- `allowed_recipients` (default `["inbox@o2c.click"]`)
+- `allowed_recipients` (default `["inbox@example.com"]`)
 - `allow_list_domains` (default `["gmail.com"]`)
 - `killswitch_received_threshold` (default 50 = 5 分間に 50 通受信したら遮断)
 - `killswitch_invocation_threshold` (default 50)
@@ -72,14 +72,14 @@ terraform apply
 ### 3. DNS 伝播待ち + SES verification (新規 apply 時)
 
 ```sh
-dig +short MX o2c.click @8.8.8.8
-aws sesv2 get-email-identity --email-identity o2c.click --region ap-northeast-1 \
+dig +short MX example.com @8.8.8.8
+aws sesv2 get-email-identity --email-identity example.com --region ap-northeast-1 \
   --query '{V:VerifiedForSendingStatus,D:DkimAttributes.Status}'
 ```
 
 ### 4. 通常動作確認 (gmail 送信)
 
-`inbox@o2c.click` 宛 → `ACCEPTED` ログ。02 と同じ挙動。
+`inbox@example.com` 宛 → `ACCEPTED` ログ。02 と同じ挙動。
 
 ### 5. killswitch 動作確認
 

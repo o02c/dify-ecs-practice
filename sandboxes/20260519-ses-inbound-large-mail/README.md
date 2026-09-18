@@ -18,7 +18,7 @@
 
 ## 検証環境
 
-- Domain: `o2c.click` (Route53 Domains 登録済)
+- Domain: `example.com` (Route53 Domains 登録済)
 - Region: `ap-northeast-1`
 - AWS Profile: `terraform`
 - module: `modules/ses-inbound` (本 sandbox 配下、S3-trigger 版)

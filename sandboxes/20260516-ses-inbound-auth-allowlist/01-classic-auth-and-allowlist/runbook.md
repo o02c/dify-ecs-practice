@@ -6,11 +6,11 @@ IP Address Filter は terraform のサンプルとして書くだけ (デフォ�
 ## 概要
 
 ```
-                        +-- Rule "archive-all"  recipients=[o2c.click] → S3 archive (全受信メール永続化)
+                        +-- Rule "archive-all"  recipients=[example.com] → S3 archive (全受信メール永続化)
                         |
 Receipt Rule Set ------ +
                         |
-                        +-- Rule "process-inbox" recipients=[inbox@o2c.click] → SNS → Lambda
+                        +-- Rule "process-inbox" recipients=[inbox@example.com] → SNS → Lambda
                                                                                        │
                                                                                        ▼
                                                                               ┌────────────────────────┐
@@ -53,7 +53,7 @@ Receipt Rule Set ------ +
   ```sh
   aws ses describe-active-receipt-rule-set --region ap-northeast-1
   ```
-- `o2c.click` の Route53 Hosted Zone は 20260512 destroy で消えているので、本 sandbox で新規作成 → DNS 伝播待ち (約 30 分) が発生する
+- `example.com` の Route53 Hosted Zone は 20260512 destroy で消えているので、本 sandbox で新規作成 → DNS 伝播待ち (約 30 分) が発生する
 
 ## 手順
 
@@ -80,8 +80,8 @@ apply で構築されるもの (20260512 の 02 とほぼ同じだが、Lambda e
 ### 2. DNS 伝播待ち + SES verification
 
 ```sh
-dig +short MX o2c.click @8.8.8.8
-aws sesv2 get-email-identity --email-identity o2c.click --region ap-northeast-1 \
+dig +short MX example.com @8.8.8.8
+aws sesv2 get-email-identity --email-identity example.com --region ap-northeast-1 \
   --query '{V:VerifiedForSendingStatus,D:DkimAttributes.Status}'
 ```
 
@@ -89,7 +89,7 @@ aws sesv2 get-email-identity --email-identity o2c.click --region ap-northeast-1 
 
 ### 3. テスト (gmail から実機送信)
 
-ユーザーに依頼: 「Gmail から `inbox@o2c.click` 宛にテスト送信してください (件名・本文に識別文字列入れてください)」
+ユーザーに依頼: 「Gmail から `inbox@example.com` 宛にテスト送信してください (件名・本文に識別文字列入れてください)」
 
 期待される動作:
 - spfVerdict / dkimVerdict / dmarcVerdict すべて PASS
@@ -141,11 +141,11 @@ destroy 後は post-pr skill の AWS 棚卸し手順で orphan log group をチ�
 
 ### Test 1: Gmail からの正規メール → ACCEPTED
 
-ユーザーが Gmail から `inbox@o2c.click` 宛に送信。
+ユーザーが Gmail から `inbox@example.com` 宛に送信。
 
 ```
 ACCEPTED messageId=1qfaf51hvpto30h832ntmfcd6vb79i3e29espsg1
-From=Kentaro Ohtsuka <ohtsuka.kentaro.o2c@gmail.com> To=inbox@o2c.click
+From=Test Sender <test-sender@gmail.com> To=inbox@example.com
 Body preview: テスト送信の内容
 Duration: 14.72 ms / Init: 116 ms / Memory: 41 MB
 ```
@@ -156,7 +156,7 @@ Duration: 14.72 ms / Init: 116 ms / Memory: 41 MB
 
 ### Test 2: SES self-send → WARN auth (DMARC GRAY)
 
-`aws sesv2 send-email --from test@o2c.click --to inbox@o2c.click` で送信。
+`aws sesv2 send-email --from test@example.com --to inbox@example.com` で送信。
 
 ```
 WARN auth: dmarcVerdict=GRAY dmarcPolicy=- spf=PASS dkim=GRAY
@@ -200,7 +200,7 @@ cat > /tmp/spoof-payload.json <<'EOF'
         "Type": "Notification",
         "MessageId": "spoof-test-001",
         "TopicArn": "arn:aws:sns:ap-northeast-1:<account-id>:ses-inbound-v3-mail",
-        "Message": "{\"notificationType\":\"Received\",\"mail\":{\"timestamp\":\"2026-05-17T01:00:00.000Z\",\"source\":\"attacker@evil.example\",\"messageId\":\"spoof-message-id-001\",\"destination\":[\"inbox@o2c.click\"],\"headersTruncated\":false,\"headers\":[{\"name\":\"From\",\"value\":\"Gmail Support <support@gmail.com>\"}],\"commonHeaders\":{\"from\":[\"Gmail Support <support@gmail.com>\"],\"to\":[\"inbox@o2c.click\"],\"subject\":\"Spoofing attempt\"}},\"receipt\":{\"timestamp\":\"2026-05-17T01:00:01.000Z\",\"processingTimeMillis\":100,\"recipients\":[\"inbox@o2c.click\"],\"spfVerdict\":{\"status\":\"FAIL\"},\"dkimVerdict\":{\"status\":\"FAIL\"},\"dmarcVerdict\":{\"status\":\"FAIL\"},\"dmarcPolicy\":\"reject\",\"spamVerdict\":{\"status\":\"PASS\"},\"virusVerdict\":{\"status\":\"PASS\"},\"action\":{\"type\":\"SNS\",\"topicArn\":\"arn:aws:sns:ap-northeast-1:<account-id>:ses-inbound-v3-mail\",\"encoding\":\"UTF8\"}},\"content\":\"From: Gmail Support <support@gmail.com>\\r\\nTo: inbox@o2c.click\\r\\nSubject: Spoofing attempt\\r\\n\\r\\nThis is spoofed.\"}",
+        "Message": "{\"notificationType\":\"Received\",\"mail\":{\"timestamp\":\"2026-05-17T01:00:00.000Z\",\"source\":\"attacker@evil.example\",\"messageId\":\"spoof-message-id-001\",\"destination\":[\"inbox@example.com\"],\"headersTruncated\":false,\"headers\":[{\"name\":\"From\",\"value\":\"Gmail Support <support@gmail.com>\"}],\"commonHeaders\":{\"from\":[\"Gmail Support <support@gmail.com>\"],\"to\":[\"inbox@example.com\"],\"subject\":\"Spoofing attempt\"}},\"receipt\":{\"timestamp\":\"2026-05-17T01:00:01.000Z\",\"processingTimeMillis\":100,\"recipients\":[\"inbox@example.com\"],\"spfVerdict\":{\"status\":\"FAIL\"},\"dkimVerdict\":{\"status\":\"FAIL\"},\"dmarcVerdict\":{\"status\":\"FAIL\"},\"dmarcPolicy\":\"reject\",\"spamVerdict\":{\"status\":\"PASS\"},\"virusVerdict\":{\"status\":\"PASS\"},\"action\":{\"type\":\"SNS\",\"topicArn\":\"arn:aws:sns:ap-northeast-1:<account-id>:ses-inbound-v3-mail\",\"encoding\":\"UTF8\"}},\"content\":\"From: Gmail Support <support@gmail.com>\\r\\nTo: inbox@example.com\\r\\nSubject: Spoofing attempt\\r\\n\\r\\nThis is spoofed.\"}",
         "Timestamp": "2026-05-17T01:00:01.000Z"
       }
     }
